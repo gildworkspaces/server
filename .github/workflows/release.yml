@@ -66,8 +66,9 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
           mkdir -p "out/$TAG"
-          for d in dist/gild-server-*; do
-            name="${d#dist/gild-server-}"
+          # download-artifact leaves dist/<name>/gild-server after the reorg step above
+          for d in dist/darwin-* dist/linux-*; do
+            name=$(basename "$d")
             cp "$d/gild-server" "out/$TAG/gild-server-$name"
           done
           cd "out/$TAG"

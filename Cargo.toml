@@ -1,6 +1,6 @@
 [package]
 name = "gild-server"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 license = "MIT"
 description = "gild server — the self-hosted forge backend (git smart-HTTP, forge API, claim ledger)"
