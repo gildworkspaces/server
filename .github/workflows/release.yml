@@ -1,0 +1,84 @@
+# SCCACHE IS REQUIRED FOR ALL RUST COMPILATION (see ci.yml header).
+# npm trusted publishing: no NPM_TOKEN; OIDC proves repo + workflow +
+# environment (gildforge/server, release.yml, release) to npm.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    environment: release
+    strategy:
+      matrix:
+        include:
+          - { runner: macos-14, target: aarch64-apple-darwin, name: darwin-arm64 }
+          - { runner: macos-15-intel, target: x86_64-apple-darwin, name: darwin-x64 }
+          - { runner: ubuntu-latest, target: x86_64-unknown-linux-gnu, name: linux-x64 }
+    runs-on: ${{ matrix.runner }}
+    env:
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: '0'
+      SCCACHE_BUCKET: ${{ secrets.SCCACHE_BUCKET }}
+      SCCACHE_ENDPOINT: ${{ secrets.SCCACHE_ENDPOINT }}
+      SCCACHE_REGION: auto
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - name: sccache must be present and configured
+        run: |
+          command -v sccache
+          if [ -z "${{ secrets.R2_ACCESS_KEY_ID }}" ]; then
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          fi
+          sccache --show-stats
+      - run: cargo build --locked --release --target ${{ matrix.target }}
+      - run: |
+          mkdir -p dist/${{ matrix.name }}
+          cp target/${{ matrix.target }}/release/gild-server dist/${{ matrix.name }}/gild-server
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gild-server-${{ matrix.name }}
+          path: dist/${{ matrix.name }}/gild-server
+
+  publish:
+    needs: build
+    environment: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install -g npm@latest # trusted publishing needs npm >= 11.5.1
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: gild-server-*
+          path: dist
+          merge-multiple: false
+      - run: |
+          set -e
+          for d in dist/gild-server-*; do
+            name="${d#dist/gild-server-}"
+            mkdir -p "dist/$name"
+            mv "$d/gild-server" "dist/$name/gild-server"
+          done
+          node scripts/pack.mjs
+      - name: Publish platform packages
+        run: |
+          set -e
+          for p in packages/server-*; do
+            (cd "$p" && npm publish --access public)
+          done
+      - name: Publish umbrella
+        run: cd packages/server && npm publish --access public
