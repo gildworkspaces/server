@@ -57,6 +57,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - name: Upload binaries to the release bucket (releases.gild.gg/server)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -e
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          mkdir -p "out/$TAG"
+          for d in dist/gild-server-*; do
+            name="${d#dist/gild-server-}"
+            cp "$d/gild-server" "out/$TAG/gild-server-$name"
+          done
+          cd "out/$TAG"
+          for f in gild-server-*; do shasum -a 256 "$f" | cut -d' ' -f1 > "$f.sha"; done
+          jq -n --arg version "$VERSION" --arg tag "$TAG" \
+            --arg arm64 "$(cat gild-server-darwin-arm64.sha)" --arg x64 "$(cat gild-server-darwin-x64.sha)" --arg linux "$(cat gild-server-linux-x64.sha)" \
+            '{version: $version, tag: $tag, artifacts: {"gild-server-darwin-arm64": $arm64, "gild-server-darwin-x64": $x64, "gild-server-linux-x64": $linux}}' > manifest.json
+          rm -f *.sha
+          jq -n --arg version "$VERSION" --arg tag "$TAG" '{version: $version, tag: $tag}' > latest.json
+          cp latest.json "../latest.json"
+          cd ../..
+          aws s3 sync out/ "s3://${{ secrets.RELEASE_BUCKET }}/server/" \
+            --endpoint-url "${{ secrets.SCCACHE_ENDPOINT }}" --region auto
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
