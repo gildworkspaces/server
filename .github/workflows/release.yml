@@ -57,7 +57,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Upload binaries to the release bucket (releases.gild.gg/server)
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - run: npm install -g npm@latest # trusted publishing needs npm >= 11.5.1
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: gild-server-*
+          path: dist
+          merge-multiple: false
+      - name: Pack npm packages + upload binaries to the release bucket (releases.gild.gg/server)
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -66,10 +75,11 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
           mkdir -p "out/$TAG"
-          # artifacts land at dist/gild-server-<name>/gild-server (pre-reorg layout)
           for d in dist/gild-server-*; do
             name="${d#dist/gild-server-}"
-            cp "$d/gild-server" "out/$TAG/gild-server-$name"
+            mkdir -p "dist/$name"
+            mv "$d/gild-server" "dist/$name/gild-server"
+            cp "dist/$name/gild-server" "out/$TAG/gild-server-$name"
           done
           cd "out/$TAG"
           for f in gild-server-*; do shasum -a 256 "$f" | cut -d' ' -f1 > "$f.sha"; done
@@ -82,22 +92,6 @@ jobs:
           cd ../..
           aws s3 sync out/ "s3://${{ secrets.RELEASE_BUCKET }}/server/" \
             --endpoint-url "${{ secrets.SCCACHE_ENDPOINT }}" --region auto
-      - uses: actions/setup-node@v5
-        with:
-          node-version: '24'
-      - run: npm install -g npm@latest # trusted publishing needs npm >= 11.5.1
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: gild-server-*
-          path: dist
-          merge-multiple: false
-      - run: |
-          set -e
-          for d in dist/gild-server-*; do
-            name="${d#dist/gild-server-}"
-            mkdir -p "dist/$name"
-            mv "$d/gild-server" "dist/$name/gild-server"
-          done
           node scripts/pack.mjs
       - name: Publish platform packages
         run: |
